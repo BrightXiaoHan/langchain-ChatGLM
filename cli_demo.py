@@ -1,16 +1,20 @@
+import argparse
 from configs.model_config import *
 from chains.local_doc_qa import LocalDocQA
 
 # return top-k text chunk from vector store
-VECTOR_SEARCH_TOP_K = 10
+VECTOR_SEARCH_TOP_K = 3
 
 # LLM input history length
-LLM_HISTORY_LEN = 3
+LLM_HISTORY_LEN = 0
 
 # Show reply with source text from input document
 REPLY_WITH_SOURCE = True
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("filepath", type=str, help="input document file path")
+    args = parser.parse_args()
     local_doc_qa = LocalDocQA()
     local_doc_qa.init_cfg(llm_model=LLM_MODEL,
                           embedding_model=EMBEDDING_MODEL,
@@ -19,7 +23,8 @@ if __name__ == "__main__":
                           top_k=VECTOR_SEARCH_TOP_K)
     vs_path = None
     while not vs_path:
-        filepath = input("Input your local knowledge file path 请输入本地知识文件路径：")
+        # filepath = input("Input your local knowledge file path 请输入本地知识文件路径：")
+        filepath = args.filepath
         vs_path = local_doc_qa.init_knowledge_vector_store(filepath)
     history = []
     while True:
@@ -28,6 +33,9 @@ if __name__ == "__main__":
                                                                 vs_path=vs_path,
                                                                 chat_history=history)
         if REPLY_WITH_SOURCE:
-            print(resp)
+            print(resp["result"])
+            print("Source: ")
+            for doc in resp["source_documents"]:
+                print(doc.page_content)
         else:
             print(resp["result"])

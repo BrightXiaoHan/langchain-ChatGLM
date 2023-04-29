@@ -46,11 +46,8 @@ def update_status(history, status):
 
 
 def init_model():
-    try:
-        local_doc_qa.init_cfg()
-        return """模型已成功加载，请选择文件后点击"加载文件"按钮"""
-    except:
-        return """模型未成功加载，请重新选择后点击"加载模型"按钮"""
+    local_doc_qa.init_cfg()
+    return """模型已成功加载，请选择文件后点击"加载文件"按钮"""
 
 
 def reinit_model(llm_model, embedding_model, llm_history_len, top_k, history):
@@ -87,16 +84,16 @@ block_css = """.importantButton {
 .importantButton:hover {
     background: linear-gradient(45deg, #ff00e0,#8500ff, #6e00ff) !important;
     border: none !important;
-}"""
+}
 
-webui_title = """
-# 🎉langchain-ChatGLM WebUI🎉
-
-👍 [https://github.com/imClumsyPanda/langchain-ChatGLM](https://github.com/imClumsyPanda/langchain-ChatGLM)
-
+footer {visibility: hidden}
 """
 
-init_message = """欢迎使用 langchain-ChatGLM Web UI，开始提问前，请依次如下 3 个步骤：
+webui_title = """
+# ![](file/img/dianxin.jpg) 广州12345热线智能实验室系统
+"""
+
+init_message = """欢迎使用广州12345热线智能实验室系统，开始提问前，请依次如下 3 个步骤：
 1. 选择语言模型、Embedding 模型及相关参数后点击"重新加载模型"，并等待加载完成提示
 2. 上传或选择已有文件作为本地知识文档输入后点击"重新加载文档"，并等待加载完成提示
 3. 输入要提交的问题后，点击回车提交 """
@@ -104,7 +101,7 @@ init_message = """欢迎使用 langchain-ChatGLM Web UI，开始提问前，请�
 
 model_status = init_model()
 
-with gr.Blocks(css=block_css) as demo:
+with gr.Blocks(css=block_css, title="广州12345热线智能实验室系统") as demo:
     vs_path, file_status, model_status = gr.State(""), gr.State(""), gr.State(model_status)
     gr.Markdown(webui_title)
     with gr.Row():
@@ -117,28 +114,27 @@ with gr.Blocks(css=block_css) as demo:
                                ).style(container=False)
 
         with gr.Column(scale=1):
-            llm_model = gr.Radio(llm_model_dict_list,
-                                 label="LLM 模型",
-                                 value=LLM_MODEL,
-                                 interactive=True)
-            llm_history_len = gr.Slider(0,
-                                        10,
-                                        value=3,
-                                        step=1,
-                                        label="LLM history len",
-                                        interactive=True)
-            embedding_model = gr.Radio(embedding_model_dict_list,
-                                       label="Embedding 模型",
-                                       value=EMBEDDING_MODEL,
-                                       interactive=True)
-            top_k = gr.Slider(1,
-                              20,
-                              value=6,
-                              step=1,
-                              label="向量匹配 top k",
-                              interactive=True)
-            load_model_button = gr.Button("重新加载模型")
-
+            # llm_model = gr.Radio(llm_model_dict_list,
+            #                      label="LLM 模型",
+            #                      value=LLM_MODEL,
+            #                      interactive=True)
+            # llm_history_len = gr.Slider(0,
+            #                             10,
+            #                             value=3,
+            #                             step=1,
+            #                             label="LLM history len",
+            #                             interactive=True)
+            # embedding_model = gr.Radio(embedding_model_dict_list,
+            #                            label="Embedding 模型",
+            #                            value=EMBEDDING_MODEL,
+            #                            interactive=True)
+            # top_k = gr.Slider(1,
+            #                   20,
+            #                   value=6,
+            #                   step=1,
+            #                   label="向量匹配 top k",
+            #                   interactive=True)
+            # load_model_button = gr.Button("重新加载模型")
             # with gr.Column():
             with gr.Tab("select"):
                 selectFile = gr.Dropdown(file_list,
@@ -150,11 +146,13 @@ with gr.Blocks(css=block_css) as demo:
                                file_types=['.txt', '.md', '.docx', '.pdf']
                                )  # .style(height=100)
             load_file_button = gr.Button("加载文件")
-    load_model_button.click(reinit_model,
-                            show_progress=True,
-                            inputs=[llm_model, embedding_model, llm_history_len, top_k, chatbot],
-                            outputs=chatbot
-                            )
+            cite = gr.Markdown("# 中国电信广东省政务热线运营中心")
+
+    # load_model_button.click(reinit_model,
+    #                         show_progress=True,
+    #                         inputs=[llm_model, embedding_model, llm_history_len, top_k, chatbot],
+    #                         outputs=chatbot
+    #                         )
     # 将上传的文件保存到content文件夹下,并更新下拉框
     file.upload(upload_file,
                 inputs=file,
@@ -170,4 +168,4 @@ with gr.Blocks(css=block_css) as demo:
                  )
 
 demo.queue(concurrency_count=3).launch(
-    server_name='0.0.0.0', share=False, inbrowser=False)
+    server_name='0.0.0.0', share=False, inbrowser=False, favicon_path="img/dianxin.jpg")

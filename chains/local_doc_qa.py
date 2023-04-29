@@ -50,32 +50,22 @@ class LocalDocQA:
                 return None
             elif os.path.isfile(filepath):
                 file = os.path.split(filepath)[-1]
-                try:
-                    loader = UnstructuredFileLoader(filepath, mode="elements")
-                    docs = loader.load()
-                    print(f"{file} 已成功加载")
-                except:
-                    print(f"{file} 未能成功加载")
-                    return None
+                loader = UnstructuredFileLoader(filepath, mode="elements")
+                docs = loader.load()
+                print(f"{file} 已成功加载")
             elif os.path.isdir(filepath):
                 docs = []
                 for file in os.listdir(filepath):
                     fullfilepath = os.path.join(filepath, file)
-                    try:
-                        loader = UnstructuredFileLoader(fullfilepath, mode="elements")
-                        docs += loader.load()
-                        print(f"{file} 已成功加载")
-                    except:
-                        print(f"{file} 未能成功加载")
+                    loader = UnstructuredFileLoader(fullfilepath, mode="elements")
+                    docs += loader.load()
+                    print(f"{file} 已成功加载")
         else:
             docs = []
             for file in filepath:
-                try:
-                    loader = UnstructuredFileLoader(file, mode="elements")
-                    docs += loader.load()
-                    print(f"{file} 已成功加载")
-                except:
-                    print(f"{file} 未能成功加载")
+                loader = UnstructuredFileLoader(file, mode="elements")
+                docs += loader.load()
+                print(f"{file} 已成功加载")
 
         vector_store = FAISS.from_documents(docs, self.embeddings)
         vs_path = f"""./vector_store/{os.path.splitext(file)[0]}_FAISS_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}"""
