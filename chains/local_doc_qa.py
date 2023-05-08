@@ -158,7 +158,7 @@ class LocalDocQA:
         ix = create_in(ti_path, schema)
         writer = ix.writer()
         for doc in docs:
-            writer.add_document(title=doc.metadata["filename"], path="/a", content=doc.page_content)
+            writer.add_document(title=os.path.basename(doc.metadata["filename"]), path=doc.metadata["filename"], content=doc.page_content)
         writer.commit()
 
     def init_knowledge_vector_store(self,
@@ -204,8 +204,10 @@ class LocalDocQA:
                     print(f"{file} 未能成功加载")
         if len(docs) > 0:
             if vs_path and os.path.isdir(vs_path):
-                vector_store = FAISS.load_local(vs_path, self.embeddings)
-                vector_store.add_documents(docs)
+                # vector_store = FAISS.load_local(vs_path, self.embeddings)
+                # vector_store.add_documents(docs)
+                # TODO force overwrite here
+                vector_store = FAISS.from_documents(docs, self.embeddings)
                 torch_gc(DEVICE)
             else:
                 if not vs_path:

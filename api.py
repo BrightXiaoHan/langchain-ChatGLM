@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 from typing import Dict, List, Optional
 
+import fastapi
 import nltk
 import pydantic
 import uvicorn
@@ -257,7 +258,9 @@ async def chat(
 ):
     vs_path = os.path.join(API_UPLOAD_ROOT_PATH, knowledge_base_id, "vector_store")
     if not os.path.exists(vs_path):
-        raise ValueError(f"Knowledge base {knowledge_base_id} not found")
+        raise fastapi.HTTPException(
+            status_code=404, detail=f"Knowledge base {knowledge_base_id} not found"
+        )
 
     for resp, history in local_doc_qa.get_knowledge_based_answer(
         query=question, vs_path=vs_path, chat_history=history, streaming=True
@@ -341,7 +344,9 @@ async def search(
 ):
     ti_path = get_ti_path(knowledge_base_id)
     if not os.path.exists(ti_path):
-        raise ValueError(f"Knowledge base {knowledge_base_id} not found")
+        raise fastapi.HTTPException(
+            status_code=404, detail=f"Knowledge base {knowledge_base_id} not found"
+        )
 
     results = local_doc_qa.search(query=query, ti_path=ti_path, top_k=top_k)
     return SearchResponse(data=results)
