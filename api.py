@@ -4,7 +4,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import nltk
 import pydantic
@@ -14,7 +14,7 @@ from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 from typing_extensions import Annotated
 
-from chains.local_doc_qa import LocalDocQA
+from chains.local_doc_qa import LocalDocQA, load_file
 from configs.model_config import (API_UPLOAD_ROOT_PATH, EMBEDDING_DEVICE,
                                   EMBEDDING_MODEL, LLM_MODEL)
 
@@ -53,11 +53,64 @@ class ListDocsResponse(BaseResponse):
         }
 
 
+class UploadFilesResponse(BaseModel):
+    segments: Dict[str, List[str]] = pydantic.Field(
+        ..., description="Segment results of uploaded files"
+    )
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "segments": {
+                    "doc1.docx": [
+                        "第一段",
+                        "第二段",
+                        "第三段",
+                    ],
+                    "doc2.pdf": [
+                        "第一段",
+                        "第二段",
+                        "第三段",
+                    ],
+                }
+            }
+        }
+
+
+class SearchResponse(BaseResponse):
+    class SearchResult(BaseModel):
+        docname: str = pydantic.Field(..., description="Document name or id")
+        content: str = pydantic.Field(..., description="Result content")
+        matched_terms: List[str] = pydantic.Field(..., description="Matched terms")
+
+    data: List[SearchResult] = pydantic.Field(..., description="Search results")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "code": 200,
+                "msg": "success",
+                "data": [
+                    {
+                        "docname": "广州市单位从业的特定人员参加工伤保险办事指引.docx",
+                        "content": '八)  社会<b class="match term0">保险</b>经办机构业务部门...通过自查方式发现错  误审核<b class="match term1">工伤保险</b>待遇和<b class="match term1">工伤保险</b>基金支出的，  应当重新审核， 少发<b class="match term1">工伤保险</b>待遇或者<b class="match term1">工伤保险</b>基金支出的，  给予补发；  多  发<b class="match term1">工伤保险</b>待遇或者<b class="match term1">工伤保险</b>基金支出的，  应当追回',
+                        "matched_terms": ["工伤", "保险", "工伤保险"],
+                    },
+                    {
+                        "docname": "广州市单位从业的特定人员参加工伤保险办事指引.docx",
+                        "content": '办理<b class="match term1">工伤保险</b>参保手续后未按规定 及时缴纳<b class="match term1">工伤保险</b>费的期间，  <b class="match term1">工伤保险</b>关系暂不生效，   自实 际缴纳<b class="match term1">工伤保险</b>费的次日起生效',
+                        "matched_terms": ["工伤", "保险", "工伤保险"],
+                    },
+                ],
+            }
+        }
+
+
 class ChatMessage(BaseModel):
     question: str = pydantic.Field(..., description="Question text")
     response: str = pydantic.Field(..., description="Response text")
     history: List[List[str]] = pydantic.Field(..., description="History text")
-    source_documents: List[str] = pydantic.Field(
+    source_documents: List[Dict] = pydantic.Field(
         ..., description="List of source documents and their scores"
     )
 
@@ -73,9 +126,12 @@ class ChatMessage(BaseModel):
                     ]
                 ],
                 "source_documents": [
-                    "出处 [1] 广州市单位从业的特定人员参加工伤保险办事指引.docx：\n\n\t( 一)  从业单位  (组织)  按“自愿参保”原则，  为未建 立劳动关系的特定从业人员单项参加工伤保险 、缴纳工伤保 险费。",
-                    "出处 [2] ...",
-                    "出处 [3] ...",
+                    {
+                        "content": "(一)  从业单位  (组织)  按“自愿参保”原则，  为未建 立劳动关系的特定从业人员单项参加工伤保险 、缴纳工伤保 险费。",
+                        "score": 0.9999999403953552,
+                        "filename": "doc1.docx",
+                        "category": "Title",
+                    },
                 ],
             }
         }
@@ -89,6 +145,10 @@ def get_vs_path(local_doc_id: str):
     return os.path.join(API_UPLOAD_ROOT_PATH, local_doc_id, "vector_store")
 
 
+def get_ti_path(local_doc_id: str):
+    return os.path.join(API_UPLOAD_ROOT_PATH, local_doc_id, "text_index")
+
+
 def get_file_path(local_doc_id: str, doc_name: str):
     return os.path.join(API_UPLOAD_ROOT_PATH, local_doc_id, doc_name)
 
@@ -97,8 +157,11 @@ async def upload_file(
     files: Annotated[
         List[UploadFile], File(description="Multiple files as UploadFile")
     ],
-    knowledge_base_id: str = Form(..., description="Knowledge Base Name", example="kb1"),
+    knowledge_base_id: str = Form(
+        ..., description="Knowledge Base Name", example="kb1"
+    ),
 ):
+    segments = {}
     saved_path = get_folder_path(knowledge_base_id)
     if not os.path.exists(saved_path):
         os.makedirs(saved_path)
@@ -106,13 +169,20 @@ async def upload_file(
         file_path = os.path.join(saved_path, file.filename)
         with open(file_path, "wb") as f:
             f.write(file.file.read())
+        segs = load_file(file_path)
+        segments[file.filename] = [seg.page_content for seg in segs]
 
     local_doc_qa.init_knowledge_vector_store(saved_path, get_vs_path(knowledge_base_id))
-    return BaseResponse()
+    local_doc_qa.init_text_indexing(saved_path, get_ti_path(knowledge_base_id))
+    return UploadFilesResponse(
+        segments=segments,
+    )
 
 
 async def list_docs(
-    knowledge_base_id: Optional[str] = Query(description="Knowledge Base Name", example="kb1")
+    knowledge_base_id: Optional[str] = Query(
+        description="Knowledge Base Name", example="kb1"
+    )
 ):
     if knowledge_base_id:
         local_doc_folder = get_folder_path(knowledge_base_id)
@@ -138,7 +208,9 @@ async def list_docs(
 
 
 async def delete_docs(
-    knowledge_base_id: str = Form(..., description="Knowledge Base Name", example="kb1"),
+    knowledge_base_id: str = Form(
+        ..., description="Knowledge Base Name", example="kb1"
+    ),
     doc_name: Optional[str] = Form(
         None, description="doc name", example="doc_name_1.pdf"
     ),
@@ -159,13 +231,18 @@ async def delete_docs(
             local_doc_qa.init_knowledge_vector_store(
                 get_folder_path(knowledge_base_id), get_vs_path(knowledge_base_id)
             )
+            local_doc_qa.init_text_indexing(
+                get_folder_path(knowledge_base_id), get_ti_path(knowledge_base_id)
+            )
     else:
         shutil.rmtree(get_folder_path(knowledge_base_id))
     return BaseResponse()
 
 
 async def chat(
-    knowledge_base_id: str = Body(..., description="Knowledge Base Name", example="kb1"),
+    knowledge_base_id: str = Body(
+        ..., description="Knowledge Base Name", example="kb1"
+    ),
     question: str = Body(..., description="Question", example="工伤保险是什么？"),
     history: List[List[str]] = Body(
         [],
@@ -186,11 +263,17 @@ async def chat(
         query=question, vs_path=vs_path, chat_history=history, streaming=True
     ):
         pass
-    source_documents = [
-        f"""出处 [{inum + 1}] {os.path.split(doc.metadata['source'])[-1]}：\n\n{doc.page_content}\n\n"""
-        f"""相关度：{doc.metadata['score']}\n\n"""
-        for inum, doc in enumerate(resp["source_documents"])
-    ]
+
+    source_documents = []
+    for doc in resp["source_documents"]:
+        source_documents.append(
+            {
+                "content": doc.page_content,
+                "score": float(doc.metadata["score"]),
+                "filename": doc.metadata["filename"],
+                "category": doc.metadata["category"],
+            }
+        )
 
     return ChatMessage(
         question=question,
@@ -205,7 +288,9 @@ async def stream_chat(websocket: WebSocket, knowledge_base_id: str):
     vs_path = os.path.join(API_UPLOAD_ROOT_PATH, knowledge_base_id, "vector_store")
 
     if not os.path.exists(vs_path):
-        await websocket.send_json({"error": f"Knowledge base {knowledge_base_id} not found"})
+        await websocket.send_json(
+            {"error": f"Knowledge base {knowledge_base_id} not found"}
+        )
         await websocket.close()
         return
 
@@ -222,11 +307,16 @@ async def stream_chat(websocket: WebSocket, knowledge_base_id: str):
             await websocket.send_text(resp["result"][last_print_len:])
             last_print_len = len(resp["result"])
 
-        source_documents = [
-            f"""出处 [{inum + 1}] {os.path.split(doc.metadata['source'])[-1]}：\n\n{doc.page_content}\n\n"""
-            f"""相关度：{doc.metadata['score']}\n\n"""
-            for inum, doc in enumerate(resp["source_documents"])
-        ]
+        source_documents = []
+        for doc in resp["source_documents"]:
+            source_documents.append(
+                {
+                    "content": doc.page_content,
+                    "score": float(doc.metadata["score"]),
+                    "filename": doc.metadata["filename"],
+                    "category": doc.metadata["category"],
+                }
+            )
 
         await websocket.send_text(
             json.dumps(
@@ -240,6 +330,21 @@ async def stream_chat(websocket: WebSocket, knowledge_base_id: str):
             )
         )
         turn += 1
+
+
+async def search(
+    knowledge_base_id: str = Body(
+        ..., example="kb1", description="Knowledge Base Name"
+    ),
+    query: str = Body(..., example="工伤保险是什么？", description="Search query"),
+    top_k: int = Body(5, example=5, description="Number of results to return"),
+):
+    ti_path = get_ti_path(knowledge_base_id)
+    if not os.path.exists(ti_path):
+        raise ValueError(f"Knowledge base {knowledge_base_id} not found")
+
+    results = local_doc_qa.search(query=query, ti_path=ti_path, top_k=top_k)
+    return SearchResponse(data=results)
 
 
 def gen_docs():
@@ -291,6 +396,7 @@ def main():
     app.websocket("/chat-docs/stream-chat/{knowledge_base_id}")(stream_chat)
     app.post("/chat-docs/chat", response_model=ChatMessage)(chat)
     app.post("/chat-docs/upload", response_model=BaseResponse)(upload_file)
+    app.post("/chat-docs/search", response_model=SearchResponse)(search)
     app.get("/chat-docs/list", response_model=ListDocsResponse)(list_docs)
     app.delete("/chat-docs/delete", response_model=BaseResponse)(delete_docs)
 

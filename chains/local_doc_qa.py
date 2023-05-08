@@ -5,10 +5,14 @@ from models.chatglm_llm import ChatGLM
 from configs.model_config import *
 import datetime
 from textsplitter import ChineseTextSplitter
-from typing import List, Tuple
+from typing import List, Tuple, Union, Optional
 from langchain.docstore.document import Document
 import numpy as np
 from utils import torch_gc
+from whoosh.index import create_in, open_dir
+from whoosh.fields import Schema, TEXT, ID
+from whoosh.qparser import QueryParser
+from jieba.analyse import ChineseAnalyzer
 
 # return top-k text chunk from vector store
 VECTOR_SEARCH_TOP_K = 6
@@ -138,6 +142,25 @@ class LocalDocQA:
                                                 model_kwargs={'device': embedding_device})
         self.top_k = top_k
 
+    def init_text_indexing(self, filepath: Union[str, List[str]], ti_path: str):
+        if not isinstance(filepath, list):
+            if os.path.isdir(filepath):
+                filepath = [os.path.join(filepath, f) for f in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, f))]
+            else:
+                filepath = [filepath]
+
+        docs = []
+        for fp in filepath:
+            docs += load_file(fp)
+        if not os.path.exists(ti_path):
+            os.mkdir(ti_path)
+        schema = Schema(title=TEXT(stored=True), path=ID(stored=True), content=TEXT(stored=True, analyzer=ChineseAnalyzer()))
+        ix = create_in(ti_path, schema)
+        writer = ix.writer()
+        for doc in docs:
+            writer.add_document(title=doc.metadata["filename"], path="/a", content=doc.page_content)
+        writer.commit()
+
     def init_knowledge_vector_store(self,
                                     filepath: str or List[str],
                                     vs_path: str or os.PathLike = None):
@@ -160,6 +183,8 @@ class LocalDocQA:
                 docs = []
                 for file in os.listdir(filepath):
                     fullfilepath = os.path.join(filepath, file)
+                    if not os.path.isfile(fullfilepath):
+                        continue
                     try:
                         docs += load_file(fullfilepath)
                         print(f"{file} 已成功加载")
@@ -225,6 +250,20 @@ class LocalDocQA:
                         "result": result,
                         "source_documents": related_docs}
             yield response, history
+
+    def search(self, query: str, ti_path: Union[str, os.PathLike], top_k: int = 5):
+        ix = open_dir(ti_path)
+        hits = []
+        with ix.searcher() as searcher:
+            query = QueryParser("content", ix.schema).parse(query)
+            results = searcher.search(query, limit=top_k, terms=True)
+            for hit in results:
+                hits.append({
+                    "docname": hit["title"],
+                    "content": hit.highlights("content"),
+                    "matched_terms": [item[1].decode() for item in hit.matched_terms()],
+                })
+        return hits
 
 
 if __name__ == "__main__":
