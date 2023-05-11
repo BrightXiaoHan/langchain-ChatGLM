@@ -263,7 +263,7 @@ async def chat(
         )
 
     for resp, history in local_doc_qa.get_knowledge_based_answer(
-        query=question, vs_path=vs_path, chat_history=history, streaming=True
+        query=question, vs_path=vs_path, chat_history=history, streaming=True, threshold=75
     ):
         pass
 

@@ -1,11 +1,10 @@
-from langchain.embeddings.huggingface import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.document_loaders import UnstructuredFileLoader
 from models.chatglm_llm import ChatGLM
 from configs.model_config import *
 import datetime
 from textsplitter import ChineseTextSplitter
-from typing import List, Tuple, Union, Optional
+from typing import List, Tuple, Union
 from langchain.docstore.document import Document
 import numpy as np
 from utils import torch_gc
@@ -13,6 +12,7 @@ from whoosh.index import create_in, open_dir
 from whoosh.fields import Schema, TEXT, ID
 from whoosh.qparser import QueryParser
 from jieba.analyse import ChineseAnalyzer
+from chains.modules.embeddings import MyEmbeddings
 
 # return top-k text chunk from vector store
 VECTOR_SEARCH_TOP_K = 6
@@ -101,7 +101,7 @@ def similarity_search_with_score_by_vector(
                 break
     id_list = sorted(list(id_set))
     id_lists = seperate_list(id_list)
-    for id_seq in id_lists:
+    for j, id_seq in enumerate(id_lists):
         for id in id_seq:
             if id == id_seq[0]:
                 _id = self.index_to_docstore_id[id]
@@ -112,7 +112,8 @@ def similarity_search_with_score_by_vector(
                 doc.page_content += doc0.page_content
         if not isinstance(doc, Document):
             raise ValueError(f"Could not find document for id {_id}, got {doc}")
-        docs.append((doc, scores[0][j]))
+        normalized_score = 25 * (4 - scores[0][j])
+        docs.append((doc, normalized_score))
     torch_gc(DEVICE)
     return docs
 
@@ -138,7 +139,7 @@ class LocalDocQA:
                             use_ptuning_v2=use_ptuning_v2)
         self.llm.history_len = llm_history_len
 
-        self.embeddings = HuggingFaceEmbeddings(model_name=embedding_model_dict[embedding_model],
+        self.embeddings = MyEmbeddings(model_name=embedding_model_dict[embedding_model],
                                                 model_kwargs={'device': embedding_device})
         self.top_k = top_k
 
@@ -226,13 +227,15 @@ class LocalDocQA:
                                    query,
                                    vs_path,
                                    chat_history=[],
-                                   streaming: bool = STREAMING):
+                                   streaming: bool = STREAMING,
+                                   threshold: float = 0):
         vector_store = FAISS.load_local(vs_path, self.embeddings)
         FAISS.similarity_search_with_score_by_vector = similarity_search_with_score_by_vector
         vector_store.chunk_size = self.chunk_size
         related_docs_with_score = vector_store.similarity_search_with_score(query,
                                                                             k=self.top_k)
         related_docs = get_docs_with_score(related_docs_with_score)
+        related_docs = [doc for doc in related_docs if doc.metadata["score"] > threshold] # filter by threshold
         prompt = generate_prompt(related_docs, query)
 
         # if streaming:
