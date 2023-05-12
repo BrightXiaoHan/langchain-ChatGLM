@@ -25,7 +25,7 @@ nltk.data.path = [os.path.join(os.path.dirname(__file__), "nltk_data")] + nltk.d
 VECTOR_SEARCH_TOP_K = 6
 
 # LLM input history length
-LLM_HISTORY_LEN = 3
+LLM_HISTORY_LEN = 5
 
 
 class BaseResponse(BaseModel):
@@ -240,6 +240,18 @@ async def delete_docs(
     return BaseResponse()
 
 
+PROMPT_TEMPLATE = """对话记录：
+{context} 
+
+请将上述对话记录做一个摘要："""
+
+
+IS_QUESTION_TEMPLATE = """
+{text}
+
+请问上面这句话中是否包含问句，如果包含，请以抽取出用户的问题，如果不包含问题，请回答不包含问题"""
+
+
 async def chat(
     knowledge_base_id: str = Body(
         ..., description="Knowledge Base Name", example="kb1"
@@ -262,25 +274,48 @@ async def chat(
             status_code=404, detail=f"Knowledge base {knowledge_base_id} not found"
         )
 
-    for resp, history in local_doc_qa.get_knowledge_based_answer(
-        query=question, vs_path=vs_path, chat_history=history, streaming=True, threshold=75
+    prompt = IS_QUESTION_TEMPLATE.format(text=question)
+    # 首先进行判断和抽取，判断用户的问题是否包含问句，如果包含问句，则进行问句抽取，否则则直接进行摘要
+    for result, _ in local_doc_qa.llm._call(
+        prompt=prompt, streaming=True
     ):
         pass
 
     source_documents = []
-    for doc in resp["source_documents"]:
-        source_documents.append(
-            {
-                "content": doc.page_content,
-                "score": float(doc.metadata["score"]),
-                "filename": doc.metadata["filename"],
-                "category": doc.metadata["category"],
-            }
-        )
+    if "不包含" in result:
+        context = "\n".join([f"市民：{q}\n话务员：{a}" for q, a in history])
+        context += f"\n市民：{question}"
+        prompt = PROMPT_TEMPLATE.format(context=context)
+        for summary, _ in local_doc_qa.llm._call(
+            prompt=prompt, streaming=True
+        ):
+            pass
+
+        response = "由于用户的回答中不存在问题，为您抽取到对话记录中的关键信息：" + summary
+    else:
+        for resp, history in local_doc_qa.get_knowledge_based_answer(
+            query=question,
+            vs_path=vs_path,
+            chat_history=history,
+            streaming=True,
+            threshold=50,
+        ):
+            pass
+
+        response = resp["result"]
+        for doc in resp["source_documents"]:
+            source_documents.append(
+                {
+                    "content": doc.page_content,
+                    "score": float(doc.metadata["score"]),
+                    "filename": doc.metadata["filename"],
+                    "category": doc.metadata["category"],
+                }
+            )
 
     return ChatMessage(
         question=question,
-        response=resp["result"],
+        response=response,
         history=history,
         source_documents=source_documents,
     )

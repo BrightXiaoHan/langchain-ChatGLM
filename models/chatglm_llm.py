@@ -82,6 +82,7 @@ class ChatGLM(LLM):
                     history=history[-self.history_len:] if self.history_len > 0 else [],
                     max_length=self.max_token,
                     temperature=self.temperature,
+                    do_sample=False,
             )
             torch_gc(DEVICE)
             history += [[prompt, response]]
