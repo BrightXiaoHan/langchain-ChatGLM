@@ -114,6 +114,7 @@ class ChatMessage(BaseModel):
     source_documents: List[Dict] = pydantic.Field(
         ..., description="List of source documents and their scores"
     )
+    key_msgs: List[str] = pydantic.Field(..., description="Key messages")
 
     class Config:
         schema_extra = {
@@ -134,6 +135,9 @@ class ChatMessage(BaseModel):
                         "category": "Title",
                     },
                 ],
+                "key_msgs": [
+                    "工伤保险",
+                ]
             }
         }
 
@@ -252,6 +256,16 @@ IS_QUESTION_TEMPLATE = """
 请问上面这句话中是否包含问句，如果包含，请以抽取出用户的问题，如果不包含问题，请回答不包含问题"""
 
 
+EXTRACT = """
+请从下面的内容中抽取关键信息，如果有多个关键信息，请用；隔开：{text}
+"""
+
+
+ASK_PROMPT = """
+{text}
+"""
+
+
 async def chat(
     knowledge_base_id: str = Body(
         ..., description="Knowledge Base Name", example="kb1"
@@ -274,50 +288,59 @@ async def chat(
             status_code=404, detail=f"Knowledge base {knowledge_base_id} not found"
         )
 
-    prompt = IS_QUESTION_TEMPLATE.format(text=question)
-    # 首先进行判断和抽取，判断用户的问题是否包含问句，如果包含问句，则进行问句抽取，否则则直接进行摘要
-    for result, _ in local_doc_qa.llm._call(
-        prompt=prompt, streaming=True
-    ):
-        pass
-
-    source_documents = []
-    if "不包含" in result:
-        context = "\n".join([f"市民：{q}\n话务员：{a}" for q, a in history])
-        context += f"\n市民：{question}"
-        prompt = PROMPT_TEMPLATE.format(context=context)
-        for summary, _ in local_doc_qa.llm._call(
+    if len(question) > 10:
+        prompt = EXTRACT.format(text=question)
+        # 首先进行判断和抽取，判断用户的问题是否包含问句，如果包含问句，则进行问句抽取，否则则直接进行摘要
+        for result, _ in local_doc_qa.llm._call(
             prompt=prompt, streaming=True
         ):
             pass
-
-        response = "由于用户的回答中不存在问题，为您抽取到对话记录中的关键信息：" + summary
     else:
-        for resp, history in local_doc_qa.get_knowledge_based_answer(
-            query=question,
-            vs_path=vs_path,
-            chat_history=history,
-            streaming=True,
-            threshold=50,
-        ):
-            pass
+        result = question
 
-        response = resp["result"]
-        for doc in resp["source_documents"]:
-            source_documents.append(
-                {
-                    "content": doc.page_content,
-                    "score": float(doc.metadata["score"]),
-                    "filename": doc.metadata["filename"],
-                    "category": doc.metadata["category"],
-                }
-            )
+    result = result.replace("关键信息：", "").strip()
+    key_msgs = result.split("\n")
+    if len(key_msgs) <= 1:
+        key_msgs = result.split("；")
+
+    source_documents = []
+    # if "不包含" in result:
+    #     context = "\n".join([f"市民：{q}\n话务员：{a}" for q, a in history])
+    #     context += f"\n市民：{question}"
+    #     prompt = PROMPT_TEMPLATE.format(context=context)
+    #     for summary, _ in local_doc_qa.llm._call(
+    #         prompt=prompt, streaming=True
+    #     ):
+    #         pass
+
+    #     response = "由于用户的回答中不存在问题，为您抽取到对话记录中的关键信息：" + summary
+    # else:
+    for resp, history in local_doc_qa.get_knowledge_based_answer(
+        query=result,
+        vs_path=vs_path,
+        chat_history=history,
+        streaming=True,
+        threshold=50,
+    ):
+        pass
+
+    response = resp["result"]
+    for doc in resp["source_documents"]:
+        source_documents.append(
+            {
+                "content": doc.page_content,
+                "score": float(doc.metadata["score"]),
+                "filename": doc.metadata["filename"],
+                "category": doc.metadata["category"],
+            }
+        )
 
     return ChatMessage(
         question=question,
         response=response,
         history=history,
         source_documents=source_documents,
+        key_msgs=result.split("；"),
     )
 
 
