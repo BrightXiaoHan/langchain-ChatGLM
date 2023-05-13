@@ -298,8 +298,8 @@ async def chat(
     else:
         result = question
 
-    result = result.replace("关键信息：", "").strip()
-    key_msgs = result.split("\n")
+    result = result.replace("关键信息：", "")
+    key_msgs = result.strip().split("\n")
     if len(key_msgs) <= 1:
         key_msgs = result.split("；")
 
