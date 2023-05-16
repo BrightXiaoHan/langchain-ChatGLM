@@ -109,8 +109,15 @@ class SearchResponse(BaseResponse):
 
 
 class ChatMessage(BaseModel):
+    class SourceDocument(BaseModel):
+        content: str = pydantic.Field(..., description="Document content")
+        raw_content: str = pydantic.Field(..., description="Document raw content")
+        score: float = pydantic.Field(..., description="Score")
+        filename: str = pydantic.Field(..., description="Document name")
+        category: str = pydantic.Field(..., description="Document category")
+
     question: str = pydantic.Field(..., description="Question text")
-    source_documents: List[Dict] = pydantic.Field(
+    source_documents: List[SourceDocument] = pydantic.Field(
         ..., description="List of source documents and their scores"
     )
 
@@ -120,9 +127,8 @@ class ChatMessage(BaseModel):
                 "question": "工伤保险如何办理？",
                 "source_documents": [
                     {
-                        "content": [
-                            "(一)  从业单位  (组织)  按“自愿参保”原则，  为未建 立劳动关系的特定从业人员单项参加工伤保险 、缴纳工伤保 险费。"
-                        ],
+                        "content": "(一)  从业单位  (组织)  按“自愿参保”原则，  为未建 立劳动关系的特定从业人员单项参加工伤保险 、缴纳工伤保 险费。",
+                        "raw_content": "不包含标签和前后文的原始匹配到的文本",
                         "score": 0.9999999403953552,
                         "filename": "doc1.docx",
                         "category": "Title",
@@ -130,6 +136,30 @@ class ChatMessage(BaseModel):
                 ],
             }
         }
+
+
+class SummaryRequest(BaseModel):
+    history: List[List[str]] = pydantic.Field(..., description="History text")
+
+    class Config:
+        schema_extra = {
+            "example": [
+                [
+                    "工伤保险是什么？",
+                    "工伤保险是指用人单位按照国家规定，为本单位的职工和用人单位的其他人员，缴纳工伤保险费，由保险机构按照国家规定的标准，给予工伤保险待遇的社会保险制度。",
+                ]
+            ],
+        }
+
+    @pydantic.validator("history")
+    def check_history_length(cls, v):
+        for item in v:
+            if len(item) != 2:
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail="History text should be a list of (question, answer) pairs",
+                )
+        return v
 
 
 class SummaryResponse(BaseResponse):
@@ -255,22 +285,11 @@ async def delete_docs(
 PROMPT_TEMPLATE = """对话记录：
 {context} 
 
-请将上述对话记录的关键信息提取出来："""
+请将上述对话记录的关键信息提取出来，要进行总结不要照抄对话，不要漏掉关键信息，不要编造额外信息："""
 
 
-async def summary(
-    history: List[List[str]] = Body(
-        ...,
-        description="History of previous questions and answers",
-        example=[
-            [
-                "工伤保险是什么？",
-                "工伤保险是指用人单位按照国家规定，为本单位的职工和用人单位的其他人员，缴纳工伤保险费，由保险机构按照国家规定的标准，给予工伤保险待遇的社会保险制度。",
-            ]
-        ],
-        embed=True,
-    ),
-):
+async def summary(body: SummaryRequest = Body(..., embed=False)):
+    history = body.history
     context = "\n".join([f"话务员：{q}\n市民：{a}" for q, a in history])
     prompt = PROMPT_TEMPLATE.format(context=context)
     for summary, _ in local_doc_qa.llm._call(prompt=prompt, streaming=True):
@@ -316,7 +335,7 @@ async def chat(
                 doc["raw_content"] for doc in source_documents
             ]:
                 index = [doc["raw_content"] for doc in source_documents].index(
-                    item.page_content
+                    item.metadata["raw_content"]
                 )
                 source_documents[index]["score"] = 0.5 * (
                     item.metadata["score"] + source_documents[index]["score"]
