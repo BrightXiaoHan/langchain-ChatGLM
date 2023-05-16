@@ -10,7 +10,7 @@ import numpy as np
 from utils import torch_gc
 from whoosh.index import create_in, open_dir
 from whoosh.fields import Schema, TEXT, ID
-from whoosh.qparser import QueryParser
+from whoosh.qparser import QueryParser, OrGroup
 from jieba.analyse import ChineseAnalyzer
 from chains.modules.embeddings import MyEmbeddings
 
@@ -85,7 +85,8 @@ def similarity_search_with_score_by_vector(
         doc = self.docstore.search(_id)
         id_set.add(i)
         docs_len = len(doc.page_content)
-        for k in range(1, max(i, len(docs) - i)):
+        # for k in range(1, max(i, len(docs) - i)):
+        for k in range(1, 2):
             break_flag = False
             for l in [i + k, i - k]:
                 if 0 <= l < len(self.index_to_docstore_id):
@@ -106,6 +107,7 @@ def similarity_search_with_score_by_vector(
             if id == id_seq[0]:
                 _id = self.index_to_docstore_id[id]
                 doc = self.docstore.search(_id)
+                doc.metadata["raw_content"] = doc.page_content
             else:
                 _id0 = self.index_to_docstore_id[id]
                 doc0 = self.docstore.search(_id0)
@@ -150,16 +152,23 @@ class LocalDocQA:
             else:
                 filepath = [filepath]
 
-        docs = []
-        for fp in filepath:
-            docs += load_file(fp)
         if not os.path.exists(ti_path):
             os.mkdir(ti_path)
-        schema = Schema(title=TEXT(stored=True), path=ID(stored=True), content=TEXT(stored=True, analyzer=ChineseAnalyzer()))
+
+        schema = Schema(title=TEXT(stored=True), path=ID(stored=True), content=TEXT(stored=True, analyzer=ChineseAnalyzer()), prev=TEXT(stored=True), next=TEXT(stored=True))
         ix = create_in(ti_path, schema)
         writer = ix.writer()
-        for doc in docs:
-            writer.add_document(title=os.path.basename(doc.metadata["filename"]), path=doc.metadata["filename"], content=doc.page_content)
+
+        for fp in filepath:
+            docs = load_file(fp)
+            for i in range(len(docs)):
+                doc = docs[i]
+                prev, next = "", ""
+                if i > 0:
+                    prev = docs[i - 1].page_content
+                if i < len(docs) - 1:
+                    next = docs[i + 1].page_content
+                writer.add_document(title=os.path.basename(doc.metadata["filename"]), path=doc.metadata["filename"], content=doc.page_content, prev=prev, next=next)
         writer.commit()
 
     def init_knowledge_vector_store(self,
@@ -229,24 +238,9 @@ class LocalDocQA:
                                    chat_history=[],
                                    streaming: bool = STREAMING,
                                    threshold: float = 0):
-        vector_store = FAISS.load_local(vs_path, self.embeddings)
-        FAISS.similarity_search_with_score_by_vector = similarity_search_with_score_by_vector
-        vector_store.chunk_size = self.chunk_size
-        related_docs_with_score = vector_store.similarity_search_with_score(query,
-                                                                            k=self.top_k)
-        related_docs = get_docs_with_score(related_docs_with_score)
-        related_docs = [doc for doc in related_docs if doc.metadata["score"] > threshold] # filter by threshold
+        related_docs = self.dense_search(query, vs_path, top_k=self.top_k, threshold=threshold)
         prompt = generate_prompt(related_docs, query)
 
-        # if streaming:
-        #     for result, history in self.llm._stream_call(prompt=prompt,
-        #                                                  history=chat_history):
-        #         history[-1][0] = query
-        #         response = {"query": query,
-        #                     "result": result,
-        #                     "source_documents": related_docs}
-        #         yield response, history
-        # else:
         for result, history in self.llm._call(prompt=prompt,
                                               history=chat_history,
                                               streaming=streaming):
@@ -256,41 +250,28 @@ class LocalDocQA:
                         "source_documents": related_docs}
             yield response, history
 
+    def dense_search(self, query: str, vs_path: Union[str, os.PathLike], top_k: int = 5, threshold: float = 0):
+        vector_store = FAISS.load_local(vs_path, self.embeddings)
+        FAISS.similarity_search_with_score_by_vector = similarity_search_with_score_by_vector
+        vector_store.chunk_size = self.chunk_size
+        related_docs_with_score = vector_store.similarity_search_with_score(query, k=top_k)
+        related_docs = get_docs_with_score(related_docs_with_score)
+        related_docs = [doc for doc in related_docs if doc.metadata["score"] > threshold] # filter by threshold
+        return related_docs
+
     def search(self, query: str, ti_path: Union[str, os.PathLike], top_k: int = 5):
         ix = open_dir(ti_path)
         hits = []
         with ix.searcher() as searcher:
-            query = QueryParser("content", ix.schema).parse(query)
+            query = QueryParser("content", ix.schema, group=OrGroup, ).parse(query)
             results = searcher.search(query, limit=top_k, terms=True)
             for hit in results:
                 hits.append({
                     "docname": hit["title"],
-                    "content": hit.highlights("content"),
+                    "content": hit["prev"] + hit.highlights("content") + hit["next"],
+                    "raw_content": hit["content"],
                     "matched_terms": [item[1].decode() for item in hit.matched_terms()],
+                    "bm25_score": hit.score,
+                    "score": (len(hit.matched_terms()) / len(query)) * 100
                 })
         return hits
-
-
-if __name__ == "__main__":
-    local_doc_qa = LocalDocQA()
-    local_doc_qa.init_cfg()
-    query = "本项目使用的embedding模型是什么，消耗多少显存"
-    vs_path = "/Users/liuqian/Downloads/glm-dev/vector_store/aaa"
-    last_print_len = 0
-    for resp, history in local_doc_qa.get_knowledge_based_answer(query=query,
-                                                                 vs_path=vs_path,
-                                                                 chat_history=[],
-                                                                 streaming=True):
-        print(resp["result"][last_print_len:], end="", flush=True)
-        last_print_len = len(resp["result"])
-    source_text = [f"""出处 [{inum + 1}] {os.path.split(doc.metadata['source'])[-1]}：\n\n{doc.page_content}\n\n"""
-                   # f"""相关度：{doc.metadata['score']}\n\n"""
-                   for inum, doc in
-                   enumerate(resp["source_documents"])]
-    print("\n\n" + "\n\n".join(source_text))
-    # for resp, history in local_doc_qa.get_knowledge_based_answer(query=query,
-    #                                                              vs_path=vs_path,
-    #                                                              chat_history=[],
-    #                                                              streaming=False):
-    #     print(resp["result"])
-    pass

@@ -83,6 +83,7 @@ class SearchResponse(BaseResponse):
         docname: str = pydantic.Field(..., description="Document name or id")
         content: str = pydantic.Field(..., description="Result content")
         matched_terms: List[str] = pydantic.Field(..., description="Matched terms")
+        bm25_score: float = pydantic.Field(..., description="BM25 score")
 
     data: List[SearchResult] = pydantic.Field(..., description="Search results")
 
@@ -109,35 +110,42 @@ class SearchResponse(BaseResponse):
 
 class ChatMessage(BaseModel):
     question: str = pydantic.Field(..., description="Question text")
-    response: str = pydantic.Field(..., description="Response text")
-    history: List[List[str]] = pydantic.Field(..., description="History text")
     source_documents: List[Dict] = pydantic.Field(
         ..., description="List of source documents and their scores"
     )
-    key_msgs: List[str] = pydantic.Field(..., description="Key messages")
 
     class Config:
         schema_extra = {
             "example": {
                 "question": "工伤保险如何办理？",
-                "response": "根据已知信息，可以总结如下：\n\n1. 参保单位为员工缴纳工伤保险费，以保障员工在发生工伤时能够获得相应的待遇。\n2. 不同地区的工伤保险缴费规定可能有所不同，需要向当地社保部门咨询以了解具体的缴费标准和规定。\n3. 工伤从业人员及其近亲属需要申请工伤认定，确认享受的待遇资格，并按时缴纳工伤保险费。\n4. 工伤保险待遇包括工伤医疗、康复、辅助器具配置费用、伤残待遇、工亡待遇、一次性工亡补助金等。\n5. 工伤保险待遇领取资格认证包括长期待遇领取人员认证和一次性待遇领取人员认证。\n6. 工伤保险基金支付的待遇项目包括工伤医疗待遇、康复待遇、辅助器具配置费用、一次性工亡补助金、丧葬补助金等。",
-                "history": [
-                    [
-                        "工伤保险是什么？",
-                        "工伤保险是指用人单位按照国家规定，为本单位的职工和用人单位的其他人员，缴纳工伤保险费，由保险机构按照国家规定的标准，给予工伤保险待遇的社会保险制度。",
-                    ]
-                ],
                 "source_documents": [
                     {
-                        "content": "(一)  从业单位  (组织)  按“自愿参保”原则，  为未建 立劳动关系的特定从业人员单项参加工伤保险 、缴纳工伤保 险费。",
+                        "content": [
+                            "(一)  从业单位  (组织)  按“自愿参保”原则，  为未建 立劳动关系的特定从业人员单项参加工伤保险 、缴纳工伤保 险费。"
+                        ],
                         "score": 0.9999999403953552,
                         "filename": "doc1.docx",
                         "category": "Title",
                     },
                 ],
-                "key_msgs": [
-                    "工伤保险",
-                ]
+            }
+        }
+
+
+class SummaryResponse(BaseResponse):
+    class SummaryResult(BaseModel):
+        summary: str = pydantic.Field(..., description="Summary content")
+
+    data: SummaryResult = pydantic.Field(..., description="Summary results")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "code": 200,
+                "msg": "success",
+                "data": {
+                    "summary": "办理工伤保险参保手续后未按规定 及时缴纳工伤保险费的期间，  工伤保险关系暂不生效，   自实 际缴纳工伤保险费的次日起生效",
+                },
             }
         }
 
@@ -247,32 +255,12 @@ async def delete_docs(
 PROMPT_TEMPLATE = """对话记录：
 {context} 
 
-请将上述对话记录做一个摘要："""
+请将上述对话记录的关键信息提取出来："""
 
 
-IS_QUESTION_TEMPLATE = """
-{text}
-
-请问上面这句话中是否包含问句，如果包含，请以抽取出用户的问题，如果不包含问题，请回答不包含问题"""
-
-
-EXTRACT = """
-请从下面的内容中抽取关键信息，如果有多个关键信息，请用；隔开：{text}
-"""
-
-
-ASK_PROMPT = """
-{text}
-"""
-
-
-async def chat(
-    knowledge_base_id: str = Body(
-        ..., description="Knowledge Base Name", example="kb1"
-    ),
-    question: str = Body(..., description="Question", example="工伤保险是什么？"),
+async def summary(
     history: List[List[str]] = Body(
-        [],
+        ...,
         description="History of previous questions and answers",
         example=[
             [
@@ -280,7 +268,21 @@ async def chat(
                 "工伤保险是指用人单位按照国家规定，为本单位的职工和用人单位的其他人员，缴纳工伤保险费，由保险机构按照国家规定的标准，给予工伤保险待遇的社会保险制度。",
             ]
         ],
+        embed=True,
     ),
+):
+    context = "\n".join([f"话务员：{q}\n市民：{a}" for q, a in history])
+    prompt = PROMPT_TEMPLATE.format(context=context)
+    for summary, _ in local_doc_qa.llm._call(prompt=prompt, streaming=True):
+        pass
+    return SummaryResponse(data={"summary": summary})
+
+
+async def chat(
+    knowledge_base_id: str = Body(
+        ..., description="Knowledge Base Name", example="kb1"
+    ),
+    question: str = Body(..., description="Question", example="工伤保险是什么？"),
 ):
     vs_path = os.path.join(API_UPLOAD_ROOT_PATH, knowledge_base_id, "vector_store")
     if not os.path.exists(vs_path):
@@ -288,59 +290,56 @@ async def chat(
             status_code=404, detail=f"Knowledge base {knowledge_base_id} not found"
         )
 
-    if len(question) > 10:
-        prompt = EXTRACT.format(text=question)
-        # 首先进行判断和抽取，判断用户的问题是否包含问句，如果包含问句，则进行问句抽取，否则则直接进行摘要
-        for result, _ in local_doc_qa.llm._call(
-            prompt=prompt, streaming=True
-        ):
-            pass
-    else:
-        result = question
-
-    result = result.replace("关键信息：", "")
-    key_msgs = result.strip().split("\n")
-    if len(key_msgs) <= 1:
-        key_msgs = result.split("；")
-
     source_documents = []
-    # if "不包含" in result:
-    #     context = "\n".join([f"市民：{q}\n话务员：{a}" for q, a in history])
-    #     context += f"\n市民：{question}"
-    #     prompt = PROMPT_TEMPLATE.format(context=context)
-    #     for summary, _ in local_doc_qa.llm._call(
-    #         prompt=prompt, streaming=True
-    #     ):
-    #         pass
+    ti_path = get_ti_path(knowledge_base_id)
+    results = local_doc_qa.search(
+        query=question, ti_path=ti_path, top_k=VECTOR_SEARCH_TOP_K * 2
+    )
 
-    #     response = "由于用户的回答中不存在问题，为您抽取到对话记录中的关键信息：" + summary
-    # else:
-    for resp, history in local_doc_qa.get_knowledge_based_answer(
-        query=result,
-        vs_path=vs_path,
-        chat_history=history,
-        streaming=True,
-        threshold=50,
-    ):
-        pass
-
-    response = resp["result"]
-    for doc in resp["source_documents"]:
+    for item in results:
         source_documents.append(
             {
-                "content": doc.page_content,
-                "score": float(doc.metadata["score"]),
-                "filename": doc.metadata["filename"],
-                "category": doc.metadata["category"],
-            }
+                "content": item["content"],
+                "raw_content": item["raw_content"],
+                "score": item["score"],
+                "filename": item["docname"],
+                "category": "Title",
+            },
         )
+
+    # 如果问题过短，不再进行dense search
+    if len(question) >= 5:
+        dense_source_documents = []
+        dense_results = local_doc_qa.dense_search(query=question, vs_path=vs_path)
+        for item in dense_results:
+            if item.metadata["raw_content"] in [
+                doc["raw_content"] for doc in source_documents
+            ]:
+                index = [doc["raw_content"] for doc in source_documents].index(
+                    item.page_content
+                )
+                source_documents[index]["score"] = 0.5 * (
+                    item.metadata["score"] + source_documents[index]["score"]
+                )
+            else:
+                dense_source_documents.append(
+                    {
+                        "content": item.page_content,
+                        "score": item.metadata["score"],
+                        "filename": item.metadata["filename"],
+                        "category": item.metadata["category"],
+                        "raw_content": item.metadata["raw_content"],
+                    },
+                )
+
+        source_documents += dense_source_documents
+    source_documents = sorted(source_documents, key=lambda x: x["score"], reverse=True)
+    source_documents = list(filter(lambda x: x["score"] > 50, source_documents))
+    source_documents = source_documents[:VECTOR_SEARCH_TOP_K]
 
     return ChatMessage(
         question=question,
-        response=response,
-        history=history,
         source_documents=source_documents,
-        key_msgs=result.split("；"),
     )
 
 
@@ -460,6 +459,7 @@ def main():
     app.post("/chat-docs/chat", response_model=ChatMessage)(chat)
     app.post("/chat-docs/upload", response_model=BaseResponse)(upload_file)
     app.post("/chat-docs/search", response_model=SearchResponse)(search)
+    app.post("/chat-docs/summary", response_model=SummaryResponse)(summary)
     app.get("/chat-docs/list", response_model=ListDocsResponse)(list_docs)
     app.delete("/chat-docs/delete", response_model=BaseResponse)(delete_docs)
 
