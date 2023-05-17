@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 
 import fastapi
 import nltk
+import pycorrector
 import pydantic
 import uvicorn
 from fastapi import Body, FastAPI, File, Form, Query, UploadFile, WebSocket
@@ -418,6 +419,7 @@ async def search(
     query: str = Body(..., example="工伤保险是什么？", description="Search query"),
     top_k: int = Body(5, example=5, description="Number of results to return"),
 ):
+    query, detail = pycorrector.correct(query)
     ti_path = get_ti_path(knowledge_base_id)
     if not os.path.exists(ti_path):
         raise fastapi.HTTPException(
