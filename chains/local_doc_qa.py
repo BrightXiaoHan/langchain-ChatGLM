@@ -263,15 +263,16 @@ class LocalDocQA:
         ix = open_dir(ti_path)
         hits = []
         with ix.searcher() as searcher:
-            query = QueryParser("content", ix.schema, group=OrGroup, ).parse(query)
+            query = QueryParser("content", ix.schema, group=OrGroup).parse(query)
             results = searcher.search(query, limit=top_k, terms=True)
             for hit in results:
+                matched_terms = [item[1].decode() for item in hit.matched_terms()]
                 hits.append({
                     "docname": hit["title"],
                     "content": hit["prev"] + hit.highlights("content") + hit["next"],
                     "raw_content": hit["content"],
-                    "matched_terms": [item[1].decode() for item in hit.matched_terms()],
+                    "matched_terms": matched_terms,
                     "bm25_score": hit.score,
-                    "score": (len(hit.matched_terms()) / len(query)) * 100
+                    "score": (len(matched_terms) / len(query)) * 100
                 })
         return hits

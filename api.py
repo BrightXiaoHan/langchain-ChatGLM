@@ -330,7 +330,7 @@ async def chat(
     # 如果问题过短，不再进行dense search
     if len(question) >= 5:
         dense_source_documents = []
-        dense_results = local_doc_qa.dense_search(query=question, vs_path=vs_path)
+        dense_results = local_doc_qa.dense_search(query=question, vs_path=vs_path, threshold=65)
         for item in dense_results:
             if item.metadata["raw_content"] in [
                 doc["raw_content"] for doc in source_documents

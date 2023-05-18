@@ -61,6 +61,8 @@ class ChatGLM(LLM):
               prompt: str,
               history: List[List[str]] = [],
               streaming: bool = STREAMING):  # -> Tuple[str, List[List[str]]]:
+        # TODO
+        history = []
         if streaming:
             for inum, (stream_resp, _) in enumerate(self.model.stream_chat(
                     self.tokenizer,
