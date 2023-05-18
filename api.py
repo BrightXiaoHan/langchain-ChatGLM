@@ -144,12 +144,14 @@ class SummaryRequest(BaseModel):
 
     class Config:
         schema_extra = {
-            "example": [
-                [
-                    "工伤保险是什么？",
-                    "工伤保险是指用人单位按照国家规定，为本单位的职工和用人单位的其他人员，缴纳工伤保险费，由保险机构按照国家规定的标准，给予工伤保险待遇的社会保险制度。",
-                ]
-            ],
+            "example": {
+                "history": [
+                    [
+                        "工伤保险是什么？",
+                        "工伤保险是指用人单位按照国家规定，为本单位的职工和用人单位的其他人员，缴纳工伤保险费，由保险机构按照国家规定的标准，给予工伤保险待遇的社会保险制度。",
+                    ]
+                ],
+            }
         }
 
     @pydantic.validator("history")
@@ -330,7 +332,9 @@ async def chat(
     # 如果问题过短，不再进行dense search
     if len(question) >= 5:
         dense_source_documents = []
-        dense_results = local_doc_qa.dense_search(query=question, vs_path=vs_path, threshold=65)
+        dense_results = local_doc_qa.dense_search(
+            query=question, vs_path=vs_path, threshold=65
+        )
         for item in dense_results:
             if item.metadata["raw_content"] in [
                 doc["raw_content"] for doc in source_documents
@@ -430,6 +434,15 @@ async def search(
     return SearchResponse(data=results)
 
 
+async def upload_hardcoding_scripts(
+    file: UploadFile = File(..., description="Hardcoding Scripts File"),
+    knowledge_base_id: str = Body(
+        ..., description="Knowledge Base Name", example="kb1"
+    ),
+):
+    pass
+
+
 def gen_docs():
     global app
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json") as f:
@@ -483,11 +496,18 @@ def main():
     app.post("/chat-docs/summary", response_model=SummaryResponse)(summary)
     app.get("/chat-docs/list", response_model=ListDocsResponse)(list_docs)
     app.delete("/chat-docs/delete", response_model=BaseResponse)(delete_docs)
+    from hardcoding_scripts import (HardcodingResponse, init_text_indexing,
+                                    match_hardcoding_scripts)
+
+    app.post("/chat-docs/scripts_matching", response_model=HardcodingResponse)(
+        match_hardcoding_scripts
+    )
 
     if args.gen_docs:
         gen_docs()
         return
 
+    init_text_indexing()
     local_doc_qa = LocalDocQA()
     local_doc_qa.init_cfg(
         llm_model=LLM_MODEL,
