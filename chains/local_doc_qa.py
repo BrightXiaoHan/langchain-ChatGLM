@@ -264,6 +264,7 @@ class LocalDocQA:
         hits = []
         with ix.searcher() as searcher:
             query = QueryParser("content", ix.schema, group=OrGroup).parse(query)
+            query_len = len(query) if isinstance(query, list) else 1
             results = searcher.search(query, limit=top_k, terms=True)
             for hit in results:
                 matched_terms = [item[1].decode() for item in hit.matched_terms()]
@@ -273,6 +274,6 @@ class LocalDocQA:
                     "raw_content": hit["content"],
                     "matched_terms": matched_terms,
                     "bm25_score": hit.score,
-                    "score": (len(matched_terms) / len(query)) * 100
+                    "score": (len(matched_terms) / query_len) * 100
                 })
         return hits

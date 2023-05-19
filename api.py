@@ -215,6 +215,7 @@ async def upload_file(
         file_path = os.path.join(saved_path, file.filename)
         with open(file_path, "wb") as f:
             f.write(file.file.read())
+            f.flush()
         segs = load_file(file_path)
         segments[file.filename] = [seg.page_content for seg in segs]
 
@@ -271,7 +272,7 @@ async def delete_docs(
             return {"code": 1, "msg": f"document {doc_name} not found"}
 
         remain_docs = await list_docs(knowledge_base_id)
-        if remain_docs["code"] != 0 or len(remain_docs["data"]) == 0:
+        if remain_docs.code != 200 or len(remain_docs.data) == 0:
             shutil.rmtree(get_folder_path(knowledge_base_id), ignore_errors=True)
         else:
             local_doc_qa.init_knowledge_vector_store(
@@ -306,6 +307,7 @@ async def chat(
     ),
     question: str = Body(..., description="Question", example="工伤保险是什么？"),
 ):
+    question, _ = pycorrector.correct(question)
     vs_path = os.path.join(API_UPLOAD_ROOT_PATH, knowledge_base_id, "vector_store")
     if not os.path.exists(vs_path):
         raise fastapi.HTTPException(
@@ -333,7 +335,7 @@ async def chat(
     if len(question) >= 5:
         dense_source_documents = []
         dense_results = local_doc_qa.dense_search(
-            query=question, vs_path=vs_path, threshold=65
+            query=question, vs_path=vs_path, threshold=70
         )
         for item in dense_results:
             if item.metadata["raw_content"] in [
@@ -479,9 +481,20 @@ def gen_docs():
             )
 
 
-def main():
+def init_models():
     global app
     global local_doc_qa
+    local_doc_qa = LocalDocQA()
+    local_doc_qa.init_cfg(
+        llm_model=LLM_MODEL,
+        embedding_model=EMBEDDING_MODEL,
+        embedding_device=EMBEDDING_DEVICE,
+        llm_history_len=LLM_HISTORY_LEN,
+        top_k=VECTOR_SEARCH_TOP_K,
+    )
+
+
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7861)
@@ -508,14 +521,7 @@ def main():
         return
 
     init_text_indexing()
-    local_doc_qa = LocalDocQA()
-    local_doc_qa.init_cfg(
-        llm_model=LLM_MODEL,
-        embedding_model=EMBEDDING_MODEL,
-        embedding_device=EMBEDDING_DEVICE,
-        llm_history_len=LLM_HISTORY_LEN,
-        top_k=VECTOR_SEARCH_TOP_K,
-    )
+    init_models()
     uvicorn.run(app, host=args.host, port=args.port)
 
 

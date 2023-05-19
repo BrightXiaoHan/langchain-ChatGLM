@@ -21,7 +21,6 @@ def get_hardcoding_scripts_index_path():
 
 
 def init_text_indexing():
-    global ix
     schema = Schema(
         path=TEXT(stored=True),
         uid=ID(stored=True),
@@ -52,8 +51,7 @@ def init_text_indexing():
                 content=content,
             )
     writer.commit()
-    ix = open_dir(get_hardcoding_scripts_index_path())
-
+    
 
 class HardcodingResponse(pydantic.BaseModel):
     uid: str = pydantic.Field(..., description="编号")
@@ -69,13 +67,14 @@ class HardcodingResponse(pydantic.BaseModel):
 
 
 async def match_hardcoding_scripts(
-    query: str = fastapi.Query(..., max_length=100, description="用户输入的文本")
+    query: str = fastapi.Body(..., max_length=100, description="用户输入的文本", embed=False)
 ):
     query, _ = pycorrector.correct(query)
-    global ix
+    ix = open_dir(get_hardcoding_scripts_index_path())
     hits = []
     with ix.searcher() as searcher:
         query = QueryParser("content", ix.schema, group=OrGroup).parse(query)
+        query_len = len(query) if isinstance(query, list) else 1
         results = searcher.search(query, limit=5, terms=True)
         for hit in results:
             matched_terms = [item[1].decode() for item in hit.matched_terms()]
@@ -86,13 +85,13 @@ async def match_hardcoding_scripts(
                     "content": hit["content"],
                     "matched_terms": matched_terms,
                     "bm25_score": hit.score,
-                    "score": (len(matched_terms) / len(query)) * 100,
+                    "score": (len(matched_terms) / query_len) * 100,
                 }
             )
 
     hits = list(filter(lambda x: x["score"] > 80, hits))
     hits = sorted(hits, key=lambda x: x["score"], reverse=True)
     return HardcodingResponse(
-        uid=hits[0]["uid"],
-        content=hits[0]["content"],
+        uid=hits[0]["uid"] if hits else "",
+        content=hits[0]["content"] if hits else "",
     )
