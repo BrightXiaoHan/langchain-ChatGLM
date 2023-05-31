@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Dict, List, Optional
 
 import fastapi
@@ -11,7 +12,8 @@ import nltk
 import pycorrector
 import pydantic
 import uvicorn
-from fastapi import Body, FastAPI, File, Form, Query, UploadFile, WebSocket
+from fastapi import (Body, FastAPI, File, Form, Query, Request, UploadFile,
+                     WebSocket)
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 from typing_extensions import Annotated
@@ -289,7 +291,7 @@ async def delete_docs(
 PROMPT_TEMPLATE = """对话记录：
 {context} 
 
-请将上述对话记录的关键信息提取出来，要进行总结不要照抄对话，不要漏掉关键信息，不要编造额外信息："""
+请将描述一下市民的主要诉求以及提供的相关信息，要进行总结不要照抄对话，不要漏掉关键信息，不要编造额外信息："""
 
 
 async def summary(body: SummaryRequest = Body(..., embed=False)):
@@ -307,6 +309,7 @@ async def chat(
     ),
     question: str = Body(..., description="Question", example="工伤保险是什么？"),
 ):
+    start_time = time.time()
     question, _ = pycorrector.correct(question)
     vs_path = os.path.join(API_UPLOAD_ROOT_PATH, knowledge_base_id, "vector_store")
     if not os.path.exists(vs_path):
@@ -363,6 +366,8 @@ async def chat(
     source_documents = list(filter(lambda x: x["score"] > 50, source_documents))
     source_documents = source_documents[:VECTOR_SEARCH_TOP_K]
 
+    end_time = time.time()
+    print("Request time: {}. Question: {}. Knowledge base: {}".format(end_time - start_time, question, knowledge_base_id))
     return ChatMessage(
         question=question,
         source_documents=source_documents,
@@ -506,7 +511,7 @@ def main():
     app.post("/chat-docs/chat", response_model=ChatMessage)(chat)
     app.post("/chat-docs/upload", response_model=BaseResponse)(upload_file)
     app.post("/chat-docs/search", response_model=SearchResponse)(search)
-    app.post("/chat-docs/summary", response_model=SummaryResponse)(summary)
+    # app.post("/chat-docs/summary", response_model=SummaryResponse)(summary)
     app.get("/chat-docs/list", response_model=ListDocsResponse)(list_docs)
     app.delete("/chat-docs/delete", response_model=BaseResponse)(delete_docs)
     from hardcoding_scripts import (HardcodingResponse, init_text_indexing,
