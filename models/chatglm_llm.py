@@ -54,21 +54,22 @@ class ChatGLM(LLM):
                    llm_device=LLM_DEVICE):
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path,
-            trust_remote_code=True
+            trust_remote_code=True,
+            local_files_only=True
         )
         if torch.cuda.is_available() and llm_device.lower().startswith("cuda"):
             self.model = (
                 AutoModel.from_pretrained(
                     model_name_or_path,
-                    trust_remote_code=True)
-                .half()
+                    trust_remote_code=True, local_files_only=True)
+                .quantize(4)
                 .cuda()
             )
         else:
             self.model = (
                 AutoModel.from_pretrained(
                     model_name_or_path,
-                    trust_remote_code=True)
+                    trust_remote_code=True, local_files_only=True)
                 .float()
                 .to(llm_device)
             )

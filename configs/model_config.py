@@ -19,10 +19,12 @@ llm_model_dict = {
     "chatglm-6b-int4-qe": "THUDM/chatglm-6b-int4-qe",
     "chatglm-6b-int4": "THUDM/chatglm-6b-int4",
     "chatglm-6b": "THUDM/chatglm-6b",
+    "chatglm2-6b": "THUDM/chatglm2-6b",
+    "chatglm2-6b-int4": "./chatglm2-6b-int4",
 }
 
 # LLM model name
-LLM_MODEL = "chatglm-6b-int4"
+LLM_MODEL = "chatglm2-6b-int4"
 
 # LLM running device
 LLM_DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"

@@ -90,10 +90,10 @@ footer {visibility: hidden}
 """
 
 webui_title = """
-# ![](file/img/dianxin.jpg) 广州12345热线智能实验室系统
+# ![](file/img/dianxin.jpg) 广州12345热线智能实验室清华GLM2模型测试系统
 """
 
-init_message = """欢迎使用广州12345热线智能实验室系统，开始提问前，请依次如下 3 个步骤：
+init_message = """广州12345热线智能实验室清华GLM2模型测试系统，开始提问前，请依次如下 3 个步骤：
 1. 选择语言模型、Embedding 模型及相关参数后点击"重新加载模型"，并等待加载完成提示
 2. 上传或选择已有文件作为本地知识文档输入后点击"重新加载文档"，并等待加载完成提示
 3. 输入要提交的问题后，点击回车提交 """
@@ -146,7 +146,7 @@ with gr.Blocks(css=block_css, title="广州12345热线智能实验室系统") as
                                file_types=['.txt', '.md', '.docx', '.pdf']
                                )  # .style(height=100)
             load_file_button = gr.Button("加载文件")
-            cite = gr.Markdown("# 中国电信广东省政务热线运营中心")
+            # cite = gr.Markdown("# 中国电信广东省政务热线运营中心")
 
     # load_model_button.click(reinit_model,
     #                         show_progress=True,
